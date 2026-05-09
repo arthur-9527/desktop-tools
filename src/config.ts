@@ -1,13 +1,19 @@
-import { app } from 'electron';
+import { app, shell } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { DEFAULT_CONFIG } from './constants';
 import { Config } from './types';
 
-// 获取配置文件路径
+// 获取配置文件路径（使用应用根目录）
 function getConfigPath(): string {
-  const userDataPath = app.getPath('userData');
-  return path.join(userDataPath, 'config.json');
+  const appPath = path.dirname(app.getPath('exe'));
+  return path.join(appPath, 'config.json');
+}
+
+// 获取当前配置目录路径
+export function getConfigDirPath(): string {
+  const appPath = path.dirname(app.getPath('exe'));
+  return appPath;
 }
 
 // 读取配置，如果不存在则创建默认配置

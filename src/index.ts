@@ -1,8 +1,8 @@
-import { app, Tray, Menu, nativeImage, type NativeImage } from 'electron';
+import { app, Tray, Menu, nativeImage, type NativeImage, shell } from 'electron';
 import path from 'path';
 import { startWSServer } from './wss-server';
 import { startHTTPServer } from './http-server';
-import { getConfig, reloadConfig } from './config';
+import { getConfig, getConfigDirPath, reloadConfig } from './config';
 import type { nutjsTs } from './types';
 import type express from 'express';
 
@@ -29,12 +29,14 @@ function createTray(): void {
 
   tray = new Tray(icon);
 
-  const contextMenu = Menu.buildFromTemplate([
+const contextMenu = Menu.buildFromTemplate([
     {
       label: '显示配置',
       click: () => {
-        const config = getConfig();
-        console.log('当前配置:', config);
+        const configPath = path.join(getConfigDirPath(), 'config.json');
+        shell.openPath(configPath).catch((err) => {
+          console.error('打开配置文件失败:', err);
+        });
       },
     },
     {

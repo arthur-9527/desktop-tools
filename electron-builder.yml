@@ -31,6 +31,9 @@ files:
   - config.json
   - resources/**/*
   - node_modules/**/*
+  - "*.json"
+  - "*.yml"
+  - "*.md"
   - "!.pnpm"
   - "!**/*.map"
   - "!**/docs"
