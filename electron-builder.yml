@@ -1,0 +1,39 @@
+appId: com.agentdesk.app
+productName: AgentDesk
+asarUnpack:
+  - "@nut-tree-fork/**"
+  - "jimp/**"
+  - "@jimp/**"
+npmRebuild: true
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+directories:
+  output: release
+win:
+  signAndEditExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+files:
+  - dist/**/*
+  - config.json
+  - resources/**/*
+  - node_modules/**/*
+  - "!.pnpm"
+  - "!**/*.map"
+  - "!**/docs"
+  - "!**/test"
+  - "!**/tests"
+  - "!**/*.md"

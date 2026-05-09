@@ -1,0 +1,603 @@
+# AgentDesk 技能说明文档
+
+## 项目概述
+
+**AgentDesk** 是一个基于 Electron 的局域网远程桌面控制代理程序，通过 **双通信架构** 提供远程屏幕捕获、鼠标控制和键盘输入功能。
+
+### 核心功能
+- **屏幕捕获**：实时捕获桌面画面，支持单帧截图和持续视频流
+- **鼠标控制**：远程移动、点击、拖拽、滚轮操作
+- **键盘控制**：远程输入文本、按键组合
+- **安全认证**：基于密码的 WebSocket 连接认证 + Bearer Token HTTP 认证
+- **系统托盘**：无窗口后台运行，通过托盘图标管理
+
+---
+
+## 双通信架构
+
+### 架构概览
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Agent Desk                         │
+│                                                      │
+│  ┌─────────────┐    ┌──────────────┐               │
+│  │ HTTP Server │    │ WS Server    │               │
+│  │ :9877       │    │ :9876        │               │
+│  │             │    │              │               │
+│  │ /api/health │    │ auth         │               │
+│  │ /api/screenshot │   │ capture_frame│              │
+│  │ /api/mouse  │    │ start_stream │               │
+│  │ /api/keyboard │   │ stream       │               │
+│  └─────────────┘    └──────────────┘               │
+│                                                      │
+│  ┌──────────────────────────────────────┐           │
+│  │    nut-js (Mouse/Keyboard Automation) │           │
+│  └──────────────────────────────────────┘           │
+│                                                      │
+│  ┌──────────────────────────────────────┐           │
+│  │    desktopCapturer (Screen Capture)  │           │
+│  └──────────────────────────────────────┘           │
+└─────────────────────────────────────────────────────┘
+```
+
+**设计原则：**
+- **HTTP API** — 适合按需操作（截图、点击、输入），请求-响应模式
+- **WebSocket** — 适合持续流传输（实时桌面监控、视频流）
+
+---
+
+## HTTP API 文档
+
+### 认证方式
+
+所有 API 端点（除 `/api/health`）使用 Bearer Token 认证：
+
+```
+Authorization: Bearer admin123
+```
+
+### 截图 API
+
+#### POST /api/screenshot — 返回 base64 JSON
+
+```bash
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/screenshot \
+  -d '{"quality": 20, "maxWidth": 1024, "maxHeight": 768}'
+```
+
+**响应：**
+```json
+{
+  "data": "base64-jpeg-data...",
+  "width": 1024,
+  "height": 768,
+  "timestamp": 1234567890
+}
+```
+
+**参数：**
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| quality | number | 20 | JPEG 压缩质量 (0-100) |
+| maxWidth | number | 1024 | 最大宽度 |
+| maxHeight | number | 768 | 最大高度 |
+
+#### GET /api/screenshot — 直接返回 JPEG 图片
+
+```bash
+curl -H "Authorization: Bearer admin123" \
+  -o screenshot.jpg \
+  http://localhost:9877/api/screenshot?quality=20&maxWidth=1024&maxHeight=768
+```
+
+**响应：** JPEG 图片二进制数据
+
+### 屏幕信息 API
+
+#### GET /api/screen/info
+
+```bash
+curl -H "Authorization: Bearer admin123" \
+  http://localhost:9877/api/screen/info
+```
+
+**响应：**
+```json
+{
+  "width": 1920,
+  "height": 1080,
+  "scaleFactor": 1.5
+}
+```
+
+### 鼠标 API
+
+#### POST /api/mouse
+
+```bash
+# 移动鼠标到屏幕中心（归一化坐标 0-1000）
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "move", "x": 500, "y": 500}'
+
+# 左键点击
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "left_click"}'
+
+# 左键点击指定位置
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "left_click", "x": 500, "y": 500}'
+
+# 右键点击
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "right_click"}'
+
+# 双击
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "double_click"}'
+
+# 滚动
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "scroll", "direction": "up", "amount": 1}'
+```
+
+**请求体：**
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| action | string | move / left_click / right_click / double_click / scroll |
+| x | number | 归一化 X 坐标 (0-1000)，move/left_click 需要 |
+| y | number | 归一化 Y 坐标 (0-1000)，move/left_click 需要 |
+| direction | string | up / down，scroll 需要 |
+| amount | number | 滚动量，scroll 需要 |
+
+#### GET /api/mouse/position
+
+```bash
+curl -H "Authorization: Bearer admin123" \
+  http://localhost:9877/api/mouse/position
+```
+
+**响应：**
+```json
+{
+  "x": 1234,
+  "y": 567
+}
+```
+
+### 键盘 API
+
+#### POST /api/keyboard
+
+```bash
+# 输入文本
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/keyboard \
+  -d '{"action": "type", "text": "hello"}'
+
+# 按键按下
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/keyboard \
+  -d '{"action": "press", "keys": ["LeftWin"]}'
+
+# 按键释放
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/keyboard \
+  -d '{"action": "release", "keys": ["LeftWin"]}'
+```
+
+**请求体：**
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| action | string | type / press / release |
+| text | string | 要输入的文本，type 需要 |
+| keys | string[] | 按键数组，press/release 需要 |
+
+### 健康检查
+
+#### GET /api/health
+
+```bash
+curl http://localhost:9877/api/health
+```
+
+**响应：**
+```json
+{
+  "status": "ok",
+  "wsPort": 9876,
+  "httpPort": 9877
+}
+```
+
+### 快捷操作
+
+```bash
+# 显示桌面（Win+D）
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/keyboard \
+  -d '{"action": "press", "keys": ["LeftWin", "D"]}'
+sleep 0.05
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/keyboard \
+  -d '{"action": "release", "keys": ["LeftWin", "D"]}'
+
+# Ctrl+C
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/keyboard \
+  -d '{"action": "press", "keys": ["ControlLeft", "C"]}'
+sleep 0.05
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/keyboard \
+  -d '{"action": "release", "keys": ["ControlLeft", "C"]}'
+```
+
+---
+
+## 坐标系统
+
+### 归一化坐标 (0-1000)
+
+客户端发送的坐标使用 **0-1000 的归一化坐标系**，服务端自动转换为实际屏幕像素坐标。
+
+**转换公式：**
+```typescript
+const factor = platform === 'darwin' ? 1 : scaleFactor;
+const x = screenWidth * factor * (normalizedX / 1000);
+const y = screenHeight * factor * (normalizedY / 1000);
+```
+
+**示例：**
+- 屏幕分辨率: 1920x1080, ScaleFactor: 1.5
+- 客户端发送: `{x: 500, y: 500}`
+- 实际坐标: `{x: 1440, y: 810}` (Windows/Linux)
+- 实际坐标: `{x: 960, y: 540}` (macOS)
+
+---
+
+## WebSocket 协议（视频流 + 实时操作）
+
+### WebSocket 连接流程
+
+```
+客户端                    服务端
+  |                        |
+  | ------- connect -----> |
+  |                        |
+  | <---- auth_required ---| (如果不是认证消息)
+  |                        |
+  | ------- auth --------> | {type: 'auth', password: 'xxx'}
+  |                        |
+  | <---- auth_result -----| {type: 'auth_result', success: true/false}
+  |                        |
+  | <------- ready --------| {type: 'ready', screenSize, platform}
+  |                        |
+  | ===== 开始控制操作 ===== |
+```
+
+### 消息类型
+
+#### 1. 认证相关
+
+| 消息类型 | 方向 | 描述 |
+|---------|------|------|
+| `auth` | C→S | 发送密码进行认证 `{password: string}` |
+| `auth_result` | S→C | 认证结果 `{success: boolean}` |
+| `auth_required` | S→C | 需要认证提示 |
+| `ready` | S→C | 认证成功，服务就绪 `{screenSize, platform}` |
+
+#### 2. 屏幕控制
+
+| 消息类型 | 方向 | 描述 |
+|---------|------|------|
+| `capture_frame` | C→S | 捕获单帧 `{quality?: number, maxWidth?: number, maxHeight?: number}` |
+| `start_stream` | C→S | 开始视频流 `{fps?: number, quality?: number, maxWidth?: number, maxHeight?: number}` |
+| `stop_stream` | C→S | 停止视频流 |
+| `frame` | S→C | 帧数据 `{data: base64, width, height, timestamp}` |
+| `stream_started` | S→C | 流已开始 `{fps, quality}` |
+| `stream_stopped` | S→C | 流已停止 |
+| `get_screen_info` | C→S | 获取屏幕信息 |
+| `screen_info` | S→C | 屏幕信息 `{width, height, scaleFactor}` |
+
+**截屏参数说明：**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `quality` | number | 20 | JPEG 压缩质量 (0-100)，越低文件越小 |
+| `maxWidth` | number | 1024 | 最大宽度，用于压缩截图尺寸 |
+| `maxHeight` | number | 768 | 最大高度，用于压缩截图尺寸 |
+
+**推荐参数：** 对于 Claude vision 分析，推荐 `quality=20, maxWidth=1024, maxHeight=768`，截屏约 30-60KB（base64 后约 40-80KB）。
+
+#### 3. 鼠标控制
+
+| 消息类型 | 方向 | 描述 |
+|---------|------|------|
+| `mouse_move` | C→S | 移动鼠标 `{x, y}` (0-1000 归一化坐标) |
+| `mouse_left_click` | C→S | 左键点击 `{x?, y?}` (可选坐标) |
+| `mouse_right_click` | C→S | 右键点击 `{x?, y?}` (可选坐标) |
+| `mouse_double_click` | C→S | 双击 |
+| `mouse_press_left` | C→S | 左键按下 |
+| `mouse_release_left` | C→S | 左键释放 |
+| `mouse_drag` | C→S | 拖拽到位置 `{x, y}` |
+| `mouse_scroll` | C→S | 滚轮滚动 `{direction, amount}` |
+| `get_mouse_position` | C→S | 获取鼠标位置 |
+| `mouse_position` | S→C | 鼠标位置 `{x, y}` |
+
+#### 4. 键盘控制
+
+| 消息类型 | 方向 | 描述 |
+|---------|------|------|
+| `keyboard_type` | C→S | 输入文本 `{text: string}` |
+| `keyboard_press` | C→S | 按键按下 `{keys: string[]}` |
+| `keyboard_release` | C→S | 按键释放 `{keys: string[]}` |
+
+#### 5. 响应
+
+| 消息类型 | 方向 | 描述 |
+|---------|------|------|
+| `response` | S→C | 操作响应 `{requestType, code: 0成功/1失败, msg?}` |
+
+---
+
+## 支持的按键
+
+### 字母与数字
+`A-Z`, `0-9`
+
+### 功能键
+`F1-F24`, `Fn`
+
+### 控制键
+- `ShiftLeft` / `ShiftRight`
+- `AltLeft` / `AltRight`
+- `ControlLeft` / `ControlRight`
+- `MetaLeft` / `MetaRight` (Cmd/Win)
+- `LeftCmd` / `RightCmd`
+- `LeftWin` / `RightWin`
+
+### 特殊键
+`Enter`, `Space`, `Backspace`, `Delete`, `Tab`, `CapsLock`
+`ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`
+`Backquote`, `Backslash`
+
+---
+
+## 配置说明
+
+配置文件位置：`%APPDATA%/agent-desk/config.json` (Windows) 或对应平台的 userData 目录
+
+```json
+{
+  "wsPort": 9876,
+  "httpPort": 9877,
+  "password": "admin123"
+}
+```
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `wsPort` | WebSocket 服务端口 | 9876 |
+| `httpPort` | HTTP 服务端口 | 9877 |
+| `password` | 连接认证密码 | admin123 |
+
+---
+
+## 开发指南
+
+### 安装依赖
+```bash
+pnpm install
+```
+
+### 开发运行
+```bash
+pnpm run dev
+```
+
+### 构建
+```bash
+# 仅编译 TypeScript
+pnpm run build
+
+# 打包 Windows 安装包
+pnpm run build:win
+
+# 打包 macOS
+pnpm run build:mac
+
+# 打包 Linux
+pnpm run build:linux
+```
+
+---
+
+## 使用示例
+
+### Node.js HTTP 客户端示例
+
+```javascript
+const axios = require('axios');
+
+const BASE_URL = 'http://localhost:9877';
+const TOKEN = 'admin123';
+
+async function screenshot() {
+  // 方式1: 获取 base64 JSON
+  const resp = await axios.post(`${BASE_URL}/api/screenshot`,
+    { quality: 20, maxWidth: 1024, maxHeight: 768 },
+    { headers: { Authorization: `Bearer ${TOKEN}` } }
+  );
+  // resp.data = { data: "base64...", width, height, timestamp }
+  
+  // 方式2: 直接保存图片
+  const buffer = await axios.get(`${BASE_URL}/api/screenshot`, {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+    responseType: 'arraybuffer'
+  });
+  // require('fs').writeFileSync('screenshot.jpg', buffer.data);
+}
+
+async function mouseClick(x, y) {
+  await axios.post(`${BASE_URL}/api/mouse`,
+    { action: 'left_click', x, y },
+    { headers: { Authorization: `Bearer ${TOKEN}` } }
+  );
+}
+
+async function typeText(text) {
+  await axios.post(`${BASE_URL}/api/keyboard`,
+    { action: 'type', text },
+    { headers: { Authorization: `Bearer ${TOKEN}` } }
+  );
+}
+
+screenshot().then(() => console.log('Done'));
+```
+
+### Node.js WebSocket 客户端示例
+
+```javascript
+const WebSocket = require('ws');
+
+const ws = new WebSocket('ws://localhost:9876');
+
+ws.on('open', () => {
+  // 认证
+  ws.send(JSON.stringify({ type: 'auth', password: 'admin123' }));
+});
+
+ws.on('message', (data) => {
+  const msg = JSON.parse(data.toString());
+  
+  switch (msg.type) {
+    case 'auth_result':
+      if (msg.success) {
+        console.log('认证成功');
+        ws.send(JSON.stringify({ type: 'get_screen_info' }));
+      }
+      break;
+      
+    case 'ready':
+      ws.send(JSON.stringify({ 
+        type: 'start_stream', 
+        fps: 30, 
+        quality: 80 
+      }));
+      break;
+      
+    case 'frame':
+      console.log(`收到帧: ${msg.width}x${msg.height}`);
+      break;
+  }
+});
+
+// 鼠标点击
+ws.send(JSON.stringify({ 
+  type: 'mouse_left_click', 
+  x: 500, 
+  y: 500  // 归一化坐标 0-1000
+}));
+
+// 输入文本
+ws.send(JSON.stringify({ 
+  type: 'keyboard_type', 
+  text: 'Hello World' 
+}));
+```
+
+### Python 客户端示例
+
+```python
+from embedded_agent.skills import AgentDeskSkill
+
+async def main():
+    # HTTP 模式（默认）
+    desk = AgentDeskSkill()
+    await desk.connect()
+    
+    # 截屏（低分辨率 + 高压缩，适合 Claude vision）
+    img = await desk.capture_screen(max_width=1024, max_height=768, quality=20)
+    
+    # 操作
+    await desk.mouse_left_click(500, 500)
+    await desk.keyboard_type("hello")
+    await desk.minimize_all_windows()
+    
+    await desk.disconnect()
+    
+    # WebSocket 模式（视频流）
+    desk2 = AgentDeskSkill(transport='ws')
+    await desk2.connect()
+    await desk2.start_stream(fps=15, quality=20)
+    frame = await desk2.get_frame()
+    await desk2.stop_stream()
+    await desk2.disconnect()
+
+# Claude Code 调用方式（通过 curl）
+# 截屏: curl -s -H "Authorization: Bearer admin123" http://localhost:9877/api/screenshot
+# 点击: curl -s -H "Authorization: Bearer admin123" -X POST http://localhost:9877/api/mouse -d '{"action":"left_click","x":500,"y":500}'
+# 输入: curl -s -H "Authorization: Bearer admin123" -X POST http://localhost:9877/api/keyboard -d '{"action":"type","text":"hello"}'
+```
+
+---
+
+## 安全注意事项
+
+1. **密码保护**：默认密码为 `admin123`，生产环境务必修改
+2. **局域网限制**：建议仅在受信任的局域网内使用
+3. **防火墙配置**：确保 WebSocket/HTTP 端口在防火墙中正确配置
+4. **HTTPS/WSS**：如需公网使用，建议添加 TLS/SSL 加密层
+
+---
+
+## 平台支持
+
+| 平台 | 支持状态 | 注意事项 |
+|------|---------|---------|
+| Windows | ✅ 完全支持 | 坐标需要应用 scaleFactor |
+| macOS | ✅ 完全支持 | 需要屏幕录制权限 |
+| Linux | ⚠️ 理论支持 | 依赖 nut-js 的 Linux 支持 |
+
+---
+
+## 依赖说明
+
+- **@nut-tree-fork/nut-js**: 跨平台 UI 自动化库的分支版本
+- **electron**: 提供桌面捕获和系统托盘功能
+- **ws**: 高性能 WebSocket 实现
+- **express**: HTTP API 服务器
+
+---
+
+## 故障排查
+
+| 问题 | 可能原因 | 解决方案 |
+|------|---------|---------|
+| 无法连接 | 防火墙/端口占用 | 检查 wsPort/httpPort 配置，确保端口开放 |
+| 认证失败 | 密码错误 | 检查客户端和服务端密码配置 |
+| 屏幕捕获失败 | 权限问题 | macOS 需要授予屏幕录制权限 |
+| 鼠标无响应 | 坐标转换错误 | 确认使用 0-1000 归一化坐标 |
+| 键盘输入乱码 | 键名映射问题 | 使用 constants.ts 中定义的键名 |
+
+---
+
+## 版本历史
+
+- **v2.0.0** - 双通信架构
+  - HTTP API + WebSocket 双服务
+  - Bearer Token 认证
+  - Claude Code 友好 API 设计
+  
+- **v1.0.0** - 初始版本
+  - WebSocket 远程控制
+  - 屏幕捕获与流传输
+  - 鼠标/键盘控制
+  - 系统托盘应用
