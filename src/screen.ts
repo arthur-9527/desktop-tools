@@ -24,11 +24,11 @@ export function getScreenInfo(): ScreenInfo {
 }
 
 // 捕获单帧屏幕
-// 对于桌面控制场景，推荐使用低分辨率 + 高压缩：maxWidth=1024, maxHeight=768, quality=20
-// 这样截屏大小约 30-60KB（base64 后约 40-80KB），Claude 的 vision 完全够用
+// 对于桌面控制场景，推荐使用中等分辨率 + 高质量压缩：maxWidth=1366, maxHeight=768, quality=80
+// 768p 分辨率下 quality=80 画质几乎无损，截屏大小约 150-300KB（base64 后约 200-400KB）
 export async function captureFrame(
-  quality = 20,
-  maxWidth = 1024,
+  quality = 80,
+  maxWidth = 1366,
   maxHeight = 768
 ): Promise<FrameData> {
   const sources = await desktopCapturer.getSources({

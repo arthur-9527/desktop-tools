@@ -48,7 +48,7 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
   // GET /api/screenshot — 直接返回 JPEG 图片（适合 curl 保存）
   app.get('/api/screenshot', async (req: Request, res: Response) => {
     try {
-      const quality = req.query.quality ? parseInt(req.query.quality as string) : 20;
+      const quality = req.query.quality ? parseInt(req.query.quality as string) : 80;
       const maxWidth = req.query.maxWidth ? parseInt(req.query.maxWidth as string) : undefined;
       const maxHeight = req.query.maxHeight ? parseInt(req.query.maxHeight as string) : undefined;
       const frame = await captureFrame(quality, maxWidth, maxHeight);
@@ -65,7 +65,7 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
   // POST /api/screenshot — 返回 base64 JSON（适合程序处理）
   app.post('/api/screenshot', async (req: Request, res: Response) => {
     try {
-      const { quality = 20, maxWidth, maxHeight }: ScreenshotRequest = req.body || {};
+      const { quality = 80, maxWidth, maxHeight }: ScreenshotRequest = req.body || {};
       const frame = await captureFrame(quality, maxWidth, maxHeight);
       res.json(frame);
     } catch (err) {

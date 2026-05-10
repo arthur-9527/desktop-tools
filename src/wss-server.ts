@@ -68,15 +68,15 @@ export function startWSServer(nutjs: nutjsTs): WebSocketServer & { closeAllClien
 
           // === 屏幕 ===
           case WS_COMMAND.CAPTURE_FRAME: {
-            // maxWidth/maxHeight 默认使用屏幕分辨率，quality 默认为 20（低分辨率高压缩，适合 Claude vision 分析）
-            const frame = await captureFrame(msg.quality ?? 20, msg.maxWidth, msg.maxHeight);
+            // maxWidth/maxHeight 默认使用屏幕分辨率，quality 默认为 80（768p 分辨率下画质几乎无损）
+            const frame = await captureFrame(msg.quality ?? 80, msg.maxWidth, msg.maxHeight);
             ws.send(JSON.stringify({ type: WS_COMMAND.FRAME, ...frame }));
             break;
           }
 
           case WS_COMMAND.START_STREAM: {
             const fps = msg.fps || 15;
-            const quality = msg.quality ?? 20;
+            const quality = msg.quality ?? 80;
             const maxWidth = msg.maxWidth;  // 允许自定义最大宽度
             const maxHeight = msg.maxHeight;  // 允许自定义最大高度
             const interval = 1000 / fps;
