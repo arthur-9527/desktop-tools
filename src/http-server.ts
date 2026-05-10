@@ -1,7 +1,7 @@
 /** HTTP API Server — 提供截图、鼠标、键盘操作等 RESTful API */
 
 import express, { Request, Response, NextFunction } from 'express';
-import { captureFrame, getScreenInfo } from './screen';
+import { captureFrame, captureFrameWithGrid, getScreenInfo, DEFAULT_GRID_CONFIG } from './screen';
 import { mouseMove, mouseLeftClick, mouseRightClick, mouseDoubleClick, mouseScroll, getMousePosition } from './mouse';
 import { keyboardType, keyboardPress, keyboardRelease } from './keyboard';
 import { getConfig } from './config';
@@ -46,12 +46,45 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
   // ===== 截图 API =====
 
   // GET /api/screenshot — 直接返回 JPEG 图片（适合 curl 保存）
+  // 支持查询参数：quality, maxWidth, maxHeight, showGrid, gridSize, gridColor
   app.get('/api/screenshot', async (req: Request, res: Response) => {
     try {
       const quality = req.query.quality ? parseInt(req.query.quality as string) : 80;
       const maxWidth = req.query.maxWidth ? parseInt(req.query.maxWidth as string) : undefined;
       const maxHeight = req.query.maxHeight ? parseInt(req.query.maxHeight as string) : undefined;
-      const frame = await captureFrame(quality, maxWidth, maxHeight);
+      const showGrid = req.query.showGrid === 'true';
+
+      // 网格配置参数
+      let gridConfigOverride;
+      if (showGrid) {
+        const gridSize = req.query.gridSize ? parseInt(req.query.gridSize as string) : undefined;
+        const gridColor = req.query.gridColor ? req.query.gridColor as string : undefined;
+        const gridLineWidth = req.query.gridLineWidth ? parseInt(req.query.gridLineWidth as string) : undefined;
+        const gridAlpha = req.query.gridAlpha ? parseFloat(req.query.gridAlpha as string) : undefined;
+
+        gridConfigOverride = {};
+        if (gridSize !== undefined) gridConfigOverride.subGridSize = gridSize;
+        if (gridColor !== undefined) {
+          gridConfigOverride.mainGridColor = gridColor;
+          gridConfigOverride.subGridColor = gridColor;
+        }
+        if (gridLineWidth !== undefined) {
+          gridConfigOverride.mainGridLineWidth = gridLineWidth;
+          gridConfigOverride.subGridLineWidth = gridLineWidth;
+        }
+        if (gridAlpha !== undefined) {
+          gridConfigOverride.mainGridAlpha = gridAlpha;
+          gridConfigOverride.subGridAlpha = gridAlpha;
+        }
+      }
+
+      let frame;
+      if (showGrid) {
+        frame = await captureFrameWithGrid(quality, maxWidth, maxHeight, true, gridConfigOverride);
+      } else {
+        frame = await captureFrame(quality, maxWidth, maxHeight);
+      }
+
       const buffer = Buffer.from(frame.data, 'base64');
       res.setHeader('Content-Type', 'image/jpeg');
       res.setHeader('Content-Length', buffer.length.toString());
@@ -63,10 +96,27 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
   });
 
   // POST /api/screenshot — 返回 base64 JSON（适合程序处理）
+  // 请求体支持：quality, maxWidth, maxHeight, showGrid, gridSize, gridColor, gridLineWidth, gridAlpha
   app.post('/api/screenshot', async (req: Request, res: Response) => {
     try {
-      const { quality = 80, maxWidth, maxHeight }: ScreenshotRequest = req.body || {};
-      const frame = await captureFrame(quality, maxWidth, maxHeight);
+      const { quality = 80, maxWidth, maxHeight, showGrid = false, gridSize, gridColor, gridLineWidth, gridAlpha }: ScreenshotRequest = req.body || {};
+      let frame;
+      if (showGrid) {
+        const gridConfigOverride: any = {};
+        if (gridSize !== undefined) gridConfigOverride.subGridSize = gridSize;
+        if (gridColor !== undefined) {
+          gridConfigOverride.mainGridColor = gridColor;
+          gridConfigOverride.subGridColor = gridColor;
+        }
+        if (gridLineWidth !== undefined) {
+          gridConfigOverride.mainGridLineWidth = gridLineWidth;
+          gridConfigOverride.subGridLineWidth = gridLineWidth;
+        }
+        if (gridAlpha !== undefined) gridConfigOverride.mainGridAlpha = gridConfigOverride.subGridAlpha = gridAlpha;
+        frame = await captureFrameWithGrid(quality, maxWidth, maxHeight, true, gridConfigOverride);
+      } else {
+        frame = await captureFrame(quality, maxWidth, maxHeight);
+      }
       res.json(frame);
     } catch (err) {
       console.error('Screenshot error:', err);
@@ -213,13 +263,19 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
     console.log(`HTTP server started on port ${config.httpPort}`);
     console.log(`API endpoints:`);
     console.log(`  GET  /api/health`);
-    console.log(`  GET  /api/screenshot`);
+    console.log(`  GET  /api/screenshot?quality=80&showGrid=true`);
     console.log(`  POST /api/screenshot`);
     console.log(`  GET  /api/screen/info`);
     console.log(`  POST /api/mouse`);
     console.log(`  GET  /api/mouse/position`);
     console.log(`  POST /api/keyboard`);
     console.log(`\nAuth: Use Authorization: Bearer <password> header`);
+    console.log(`\nScreenshot grid options:`);
+    console.log(`  showGrid=true        - enable grid overlay`);
+    console.log(`  gridSize=16         - sub-grid spacing (pixels)`);
+    console.log(`  gridColor=255,0,0   - grid color (RGB)`);
+    console.log(`  gridAlpha=0.6       - grid opacity (0-1)`);
+    console.log(`  gridLineWidth=2     - grid line width (pixels)`);
   });
 
   return {
