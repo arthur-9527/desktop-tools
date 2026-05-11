@@ -9,10 +9,15 @@
     "build:win": "tsc && electron-builder --win",
     "build:mac": "tsc && electron-builder --mac",
     "build:linux": "tsc && electron-builder --linux",
-    "lint": "eslint . --config ./eslint.config.js --cache"
+    "lint": "eslint . --config ./eslint.config.js --cache",
+    "build:accessibility": "cd src/native && node-gyp rebuild",
+    "build:accessibility:win": "cd src/native && node-gyp rebuild --target=22.0.0 --arch=x64 --dist-url=https://electronjs.org/headers",
+    "build:accessibility:mac": "cd src/native && node-gyp rebuild --target=22.0.0 --arch=arm64 --dist-url=https://electronjs.org/headers",
+    "rebuild": "npm run build:accessibility"
   },
   "dependencies": {
     "@jimp/custom": "^0.22.12",
+    "node-addon-api": "^8.0.0",
     "@jimp/plugins": "^0.22.12",
     "@jimp/types": "^0.22.12",
     "@nut-tree-fork/nut-js": "^4.2.2",
@@ -62,6 +67,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "node-gyp": "^10.2.0",
     "@types/ws": "^8.5.0",
     "@typescript-eslint/eslint-plugin": "^8.59.2",
     "@typescript-eslint/parser": "^8.59.2",

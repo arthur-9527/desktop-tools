@@ -8,6 +8,7 @@
 - **屏幕捕获**：实时捕获桌面画面，支持单帧截图和持续视频流
 - **鼠标控制**：远程移动、点击、拖拽、滚轮操作
 - **键盘控制**：远程输入文本、按键组合
+- **无障碍元素树**：通过 Windows UIAutomation / macOS AXUIElement API 获取界面元素结构，提升定位精度
 - **安全认证**：基于密码的 WebSocket 连接认证 + Bearer Token HTTP 认证
 - **系统托盘**：无窗口后台运行，通过托盘图标管理
 
@@ -18,32 +19,40 @@
 ### 架构概览
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    Agent Desk                         │
-│                                                      │
-│  ┌─────────────┐    ┌──────────────┐               │
-│  │ HTTP Server │    │ WS Server    │               │
-│  │ :9877       │    │ :9876        │               │
-│  │             │    │              │               │
-│  │ /api/health │    │ auth         │               │
-│  │ /api/screenshot │   │ capture_frame│              │
-│  │ /api/mouse  │    │ start_stream │               │
-│  │ /api/keyboard │   │ stream       │               │
-│  └─────────────┘    └──────────────┘               │
-│                                                      │
-│  ┌──────────────────────────────────────┐           │
-│  │    nut-js (Mouse/Keyboard Automation) │           │
-│  └──────────────────────────────────────┘           │
-│                                                      │
-│  ┌──────────────────────────────────────┐           │
-│  │    desktopCapturer (Screen Capture)  │           │
-│  └──────────────────────────────────────┘           │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                       Agent Desk                          │
+│                                                           │
+│  ┌─────────────┐    ┌──────────────┐                    │
+│  │ HTTP Server │    │ WS Server    │                    │
+│  │ :9877       │    │ :9876        │                    │
+│  │             │    │              │                    │
+│  │ /api/health │    │ auth         │                    │
+│  │ /api/screenshot │    │ capture_frame │                    │
+│  │ /api/mouse  │    │ start_stream │                    │
+│  │ /api/keyboard │    │ stream       │                    │
+│  │ /api/accessibility│   │              │                    │
+│  └──────┬──────┘    └──────────────┘                    │
+│         │                                                │
+│  ┌──────┴──────────────────────────────────────┐        │
+│  │  Accessibility Native Addon (C++ N-API)      │        │
+│  │  Windows: UIAutomation Core API              │        │
+│  │  macOS: AXUIElement API                      │        │
+│  └──────────────────────────────────────────────┘        │
+│                                                           │
+│  ┌──────────────────────────────────────┐                │
+│  │  nut-js (Mouse/Keyboard Automation)   │                │
+│  └──────────────────────────────────────┘                │
+│                                                           │
+│  ┌──────────────────────────────────────┐                │
+│  │  desktopCapturer (Screen Capture)    │                │
+│  └──────────────────────────────────────┘                │
+└──────────────────────────────────────────────────────────┘
 ```
 
 **设计原则：**
-- **HTTP API** — 适合按需操作（截图、点击、输入），请求-响应模式
+- **HTTP API** — 适合按需操作（截图、点击、输入、获取元素树），请求-响应模式
 - **WebSocket** — 适合持续流传输（实时桌面监控、视频流）
+- **Accessibility Native Addon** — C++ N-API 插件直接调用系统 API，同步返回元素树
 
 ---
 
@@ -271,6 +280,98 @@ curl -H "Authorization: Bearer admin123" \
 | text | string | 要输入的文本，type 需要 |
 | keys | string[] | 按键数组，press/release 需要 |
 
+### 无障碍元素树 API
+
+通过 C++ 原生插件调用系统 Accessibility API，获取当前桌面的 UI 元素结构树，与截图配合使用可大幅提升 AI 定位精度。
+
+#### GET /api/accessibility — 获取完整元素树
+
+```bash
+curl -H "Authorization: Bearer admin123" \
+  http://localhost:9877/api/accessibility?maxDepth=3
+```
+
+**参数：**
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| maxDepth | number | 3 | 最大递归深度 (1-20) |
+
+**响应：**
+```json
+{
+  "tree": {
+    "role": "Pane",
+    "name": "桌面 1",
+    "bounds": { "x": 0, "y": 0, "width": 2560, "height": 1440 },
+    "children": [
+      {
+        "role": "Window",
+        "name": "Visual Studio Code",
+        "bounds": { "x": -9, "y": -9, "width": 2578, "height": 1398 },
+        "children": [...]
+      }
+    ]
+  }
+}
+```
+
+#### GET /api/accessibility/focused — 获取当前焦点元素
+
+```bash
+curl -H "Authorization: Bearer admin123" \
+  http://localhost:9877/api/accessibility/focused
+```
+
+**响应：**
+```json
+{
+  "element": {
+    "role": "Edit",
+    "name": "Message input",
+    "bounds": { "x": 1735, "y": 1236, "width": 804, "height": 50 },
+    "children": [...]
+  }
+}
+```
+
+#### 元素节点结构
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `role` | string | 元素角色（Window, Button, Edit, Text, Pane 等） |
+| `name` | string | 元素名称/文本内容 |
+| `bounds` | object | 元素位置和大小 `{x, y, width, height}` |
+| `children` | AccessibilityNode[] | 子元素数组（递归，仅当有子元素时存在） |
+
+**Role 对照表：**
+
+| role | 说明 |
+|------|------|
+| Window | 窗口 |
+| Pane | 面板/容器 |
+| Button | 按钮 |
+| Edit | 输入框 |
+| Text | 文本 |
+| CheckBox | 复选框 |
+| Menu / MenuItem | 菜单/菜单项 |
+| List / ListItem | 列表/列表项 |
+| Tree / TreeItem | 树/树节点 |
+| ComboBox | 下拉框 |
+| Hyperlink | 链接 |
+| Image | 图片 |
+| Tab / TabItem | 标签页/标签 |
+| Unknown | 未知类型 |
+
+#### 客户端辅助方法
+
+```typescript
+// 按 role 查找元素
+findElementsByRole(tree, role, name?)
+
+// 按坐标查找元素（从外到内）
+findElementsAtPoint(tree, x, y)
+```
+
 ### 健康检查
 
 #### GET /api/health
@@ -473,19 +574,37 @@ pnpm install
 pnpm run dev
 ```
 
+### 编译原生插件
+
+```bash
+# Windows（当前系统 Node.js）
+npm run build:accessibility
+# 或指定 Electron 版本
+npm run build:accessibility:win
+
+# macOS
+npm run build:accessibility:mac
+```
+
+**注意：** 原生插件需要单独编译，`npm run build`（仅 TypeScript）和 `npm run build:win` 不会自动触发。开发时需要在首次运行前先执行一次。
+
 ### 构建
+
 ```bash
 # 仅编译 TypeScript
-pnpm run build
+npm run build
 
-# 打包 Windows 安装包
-pnpm run build:win
+# 编译原生插件 + TypeScript
+npm run build:accessibility && npm run build
+
+# 打包 Windows 安装包（需先编译原生插件）
+npm run build:accessibility && npm run build:win
 
 # 打包 macOS
-pnpm run build:mac
+npm run build:accessibility:mac && npm run build:mac
 
 # 打包 Linux
-pnpm run build:linux
+npm run build:linux
 ```
 
 ---
@@ -528,6 +647,20 @@ async function typeText(text) {
     { action: 'type', text },
     { headers: { Authorization: `Bearer ${TOKEN}` } }
   );
+}
+
+async function getAccessibilityTree() {
+  const resp = await axios.get(`${BASE_URL}/api/accessibility`, {
+    params: { maxDepth: 3 },
+    headers: { Authorization: `Bearer ${TOKEN}` }
+  });
+  // resp.data.tree = { role, name, bounds, children }
+
+  // 辅助方法：查找特定元素
+  const buttons = resp.data.tree.children
+    .flatMap(n => n.children || [])
+    .filter(n => n.role === 'Button');
+  return buttons;
 }
 
 screenshot().then(() => console.log('Done'));
@@ -616,6 +749,8 @@ async def main():
 # 截屏: curl -s -H "Authorization: Bearer admin123" http://localhost:9877/api/screenshot
 # 点击: curl -s -H "Authorization: Bearer admin123" -X POST http://localhost:9877/api/mouse -d '{"action":"left_click","x":500,"y":500}'
 # 输入: curl -s -H "Authorization: Bearer admin123" -X POST http://localhost:9877/api/keyboard -d '{"action":"type","text":"hello"}'
+# 元素树: curl -s -H "Authorization: Bearer admin123" "http://localhost:9877/api/accessibility?maxDepth=2"
+# 焦点元素: curl -s -H "Authorization: Bearer admin123" "http://localhost:9877/api/accessibility/focused"
 ```
 
 ---
@@ -633,9 +768,9 @@ async def main():
 
 | 平台 | 支持状态 | 注意事项 |
 |------|---------|---------|
-| Windows | ✅ 完全支持 | 坐标需要应用 scaleFactor |
-| macOS | ✅ 完全支持 | 需要屏幕录制权限 |
-| Linux | ⚠️ 理论支持 | 依赖 nut-js 的 Linux 支持 |
+| Windows | ✅ 完全支持 + 无障碍元素树 | 坐标需要应用 scaleFactor，无障碍需 UIAutomation API（Win7+） |
+| macOS | ✅ 完全支持 + 无障碍元素树 | 需要「辅助功能」权限授权 |
+| Linux | ⚠️ 理论支持 | 依赖 nut-js 的 Linux 支持，无障碍暂不支持 |
 
 ---
 
@@ -645,6 +780,9 @@ async def main():
 - **electron**: 提供桌面捕获和系统托盘功能
 - **ws**: 高性能 WebSocket 实现
 - **express**: HTTP API 服务器
+- **node-addon-api / node-gyp**: C++ 原生插件构建工具链
+- **Windows UIAutomation Core API**: Windows 无障碍元素树获取
+- **macOS ApplicationServices / AXUIElement**: macOS 无障碍元素树获取
 
 ---
 
@@ -657,16 +795,24 @@ async def main():
 | 屏幕捕获失败 | 权限问题 | macOS 需要授予屏幕录制权限 |
 | 鼠标无响应 | 坐标转换错误 | 确认使用 0-1000 归一化坐标 |
 | 键盘输入乱码 | 键名映射问题 | 使用 constants.ts 中定义的键名 |
+| 无障碍 API 返回 `role: 'error'` | native addon 未加载 | `npm run build:accessibility` 重新编译 |
+| 无障碍 API 编译失败 | C++ 编译环境问题 | 检查是否安装 VS2022 Build Tools 和 Windows SDK |
+| macOS 无障碍无数据 | 权限未授权 | 系统设置 > 隐私 > 辅助功能 中授权 |
 
 ---
 
 ## 版本历史
 
+- **v2.1.0** - 无障碍元素树
+  - 新增 `GET /api/accessibility` 和 `GET /api/accessibility/focused`
+  - Windows UIAutomation / macOS AXUIElement 原生插件
+  - 客户端辅助方法 `findElementsByRole` / `findElementsAtPoint`
+
 - **v2.0.0** - 双通信架构
   - HTTP API + WebSocket 双服务
   - Bearer Token 认证
   - Claude Code 友好 API 设计
-  
+
 - **v1.0.0** - 初始版本
   - WebSocket 远程控制
   - 屏幕捕获与流传输

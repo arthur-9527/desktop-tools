@@ -132,6 +132,24 @@ export interface ResponseMessage extends WSMessage {
   msg?: string;
 }
 
+// Accessibility 类型定义
+export interface AccessibilityNode {
+  role: string;
+  name: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  children?: AccessibilityNode[];
+}
+
+export interface GetAccessibilityTreeMessage extends WSMessage {
+  type: 'get_accessibility_tree';
+  maxDepth?: number;
+}
+
+export interface AccessibilityTreeMessage extends WSMessage {
+  type: 'accessibility_tree';
+  tree: AccessibilityNode;
+}
+
 // HTTP API 请求/响应类型
 export interface ScreenshotRequest {
   quality?: number;
@@ -175,6 +193,15 @@ export interface HealthResponse {
   status: 'ok';
   wsPort: number;
   httpPort: number;
+}
+
+// Accessibility API 响应类型
+export interface AccessibilityTreeResponse {
+  tree: AccessibilityNode;
+}
+
+export interface FocusedElementResponse {
+  element: AccessibilityNode;
 }
 
 // Config 类型

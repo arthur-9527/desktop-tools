@@ -40,3 +40,7 @@ files:
   - "!**/test"
   - "!**/tests"
   - "!**/*.md"
+  - "src/native/build/Release/accessibility.node"
+extraFiles:
+  - from: "src/native/build/Release/accessibility.node"
+    to: "resources/accessibility.node"

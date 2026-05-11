@@ -5,7 +5,8 @@ import { captureFrame, captureFrameWithGrid, getScreenInfo, DEFAULT_GRID_CONFIG 
 import { mouseMove, mouseLeftClick, mouseRightClick, mouseDoubleClick, mouseScroll, getMousePosition } from './mouse';
 import { keyboardType, keyboardPress, keyboardRelease } from './keyboard';
 import { getConfig } from './config';
-import { ScreenshotRequest, ScreenshotResponse, ScreenInfoResponse, MouseRequest, KeyboardRequest, HealthResponse } from './types';
+import { getAccessibilityTree, getFocusedElement } from './accessibility';
+import { ScreenshotRequest, ScreenshotResponse, ScreenInfoResponse, MouseRequest, KeyboardRequest, HealthResponse, AccessibilityTreeResponse, FocusedElementResponse } from './types';
 
 // HTTP 请求中间件 — Bearer Token 认证
 function authMiddleware(req: Request, res: Response, next: NextFunction): void {
@@ -247,6 +248,34 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
     }
   });
 
+  // ===== Accessibility API =====
+
+  // GET /api/accessibility — 获取当前焦点窗口的元素树
+  // 支持查询参数：maxDepth（默认 3）
+  app.get('/api/accessibility', async (req: Request, res: Response) => {
+    try {
+      const maxDepth = req.query.maxDepth ? parseInt(req.query.maxDepth as string) : 3;
+      const tree = await getAccessibilityTree(maxDepth);
+      const response: AccessibilityTreeResponse = { tree };
+      res.json(response);
+    } catch (err) {
+      console.error('Accessibility error:', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Accessibility API error' });
+    }
+  });
+
+  // GET /api/accessibility/focused — 获取当前焦点元素
+  app.get('/api/accessibility/focused', async (_req: Request, res: Response) => {
+    try {
+      const element = await getFocusedElement();
+      const response: FocusedElementResponse = { element };
+      res.json(response);
+    } catch (err) {
+      console.error('Accessibility error:', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Accessibility API error' });
+    }
+  });
+
   // ===== 健康检查 =====
   app.get('/api/health', (_req: Request, res: Response) => {
     const config = getConfig();
@@ -269,6 +298,8 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
     console.log(`  POST /api/mouse`);
     console.log(`  GET  /api/mouse/position`);
     console.log(`  POST /api/keyboard`);
+    console.log(`  GET  /api/accessibility?maxDepth=3`);
+    console.log(`  GET  /api/accessibility/focused`);
     console.log(`\nAuth: Use Authorization: Bearer <password> header`);
     console.log(`\nScreenshot grid options:`);
     console.log(`  showGrid=true        - enable grid overlay`);
