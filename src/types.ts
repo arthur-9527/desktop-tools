@@ -176,7 +176,7 @@ export interface ScreenInfoResponse {
 }
 
 export interface MouseRequest {
-   action: 'move' | 'left_click' | 'right_click' | 'double_click' | 'scroll';
+   action: 'move' | 'left_click' | 'right_click' | 'double_click' | 'scroll' | 'drag' | 'press_left' | 'release_left';
    x?: number;
    y?: number;
    direction?: 'down' | 'up' | 'left' | 'right';

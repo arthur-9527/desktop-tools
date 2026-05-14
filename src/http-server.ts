@@ -2,7 +2,7 @@
 
 import express, { Request, Response, NextFunction } from 'express';
 import { captureFrame, captureFrameWithGrid, getScreenInfo, DEFAULT_GRID_CONFIG } from './screen';
-import { mouseMove, mouseLeftClick, mouseRightClick, mouseDoubleClick, mouseScroll, getMousePosition } from './mouse';
+import { mouseMove, mouseLeftClick, mouseRightClick, mouseDoubleClick, mouseScroll, mouseDrag, mousePressLeft, mouseReleaseLeft, getMousePosition } from './mouse';
 import { keyboardType, keyboardPress, keyboardRelease } from './keyboard';
 import { getConfig } from './config';
 import { getAccessibilityTree, getFocusedElement } from './accessibility';
@@ -180,6 +180,22 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
 
         case 'scroll':
           await mouseScroll(direction || 'down', amount || 1);
+          break;
+
+        case 'press_left':
+          await mousePressLeft();
+          break;
+
+        case 'release_left':
+          await mouseReleaseLeft();
+          break;
+
+        case 'drag':
+          if (x != null && y != null) {
+            const actualX = screenInfo.width * screenInfo.scaleFactor * (x / 1000);
+            const actualY = screenInfo.height * screenInfo.scaleFactor * (y / 1000);
+            await mouseDrag(actualX, actualY);
+          }
           break;
 
         default:

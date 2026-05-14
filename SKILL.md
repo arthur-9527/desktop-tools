@@ -226,14 +226,30 @@ curl -H "Authorization: Bearer admin123" \
 curl -H "Authorization: Bearer admin123" \
   -X POST http://localhost:9877/api/mouse \
   -d '{"action": "scroll", "direction": "up", "amount": 1}'
+
+# 拖拽操作（需要分三步：按下左键 -> 拖拽到目标位置 -> 释放左键）
+# 步骤1: 按下左键
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "press_left"}'
+
+# 步骤2: 拖拽到目标位置（可多次调用实现连续拖拽）
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "drag", "x": 500, "y": 500}'
+
+# 步骤3: 释放左键
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "release_left"}'
 ```
 
 **请求体：**
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| action | string | move / left_click / right_click / double_click / scroll |
-| x | number | 归一化 X 坐标 (0-1000)，move/left_click 需要 |
-| y | number | 归一化 Y 坐标 (0-1000)，move/left_click 需要 |
+| action | string | move / left_click / right_click / double_click / scroll / drag / press_left / release_left |
+| x | number | 归一化 X 坐标 (0-1000)，move/left_click/drag 需要 |
+| y | number | 归一化 Y 坐标 (0-1000)，move/left_click/drag 需要 |
 | direction | string | up / down，scroll 需要 |
 | amount | number | 滚动量，scroll 需要 |
 
