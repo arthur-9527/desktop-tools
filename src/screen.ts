@@ -62,39 +62,65 @@ export function getScreenSize(): { width: number; height: number } {
 
 // ========== 网格叠加功能 ==========
 
+export interface GridLevelConfig {
+  level: 32 | 64 | 128;         // 网格层级
+  cols: number;                 // 大格子列数
+  rows: number;                 // 大格子行数
+  subDivisions: number;         // 每大格细分数量（默认4，形成4x4小格）
+}
+
 export interface GridConfig {
-  // 九宫格配置
-  mainGridColor: string;        // 九宫格颜色
-  mainGridLineWidth: number;    // 九宫格线宽
-  mainGridAlpha: number;        // 九宫格透明度 (0-1)
+  // 大格子（16宫格）配置
+  mainGridCols: number;         // 大格子列数
+  mainGridRows: number;         // 大格子行数
+  mainGridColor: string;        // 大格子颜色
+  mainGridLineWidth: number;    // 大格子线宽
+  mainGridAlpha: number;        // 大格子透明度 (0-1)
 
-  // 点线网格配置
-  subGridSize: number;          // 点线网格间距（像素）
-  subGridColor: string;         // 点线网格颜色
-  subGridLineWidth: number;     // 点线网格线宽
-  subGridAlpha: number;         // 点线网格透明度 (0-1)
+  // 小格子虚线配置
+  subGridColor: string;         // 小格子颜色
+  subGridLineWidth: number;     // 小格子线宽
+  subGridAlpha: number;         // 小格子透明度 (0-1)
+  dashLength: number;           // 虚线段长度
+  gapLength: number;            // 虚线间隙长度
+  subDivisions: number;         // 每大格细分数量
+}
 
-  // 点线样式
-  dashLength: number;           // 线段长度
-  gapLength: number;            // 间隙长度
+// 网格层级配置
+export const GRID_LEVELS: Record<number, GridLevelConfig> = {
+  32: { level: 32, cols: 4, rows: 2, subDivisions: 4 },   // 4列×2行=8格 × 16小格 = 128子格
+  64: { level: 64, cols: 4, rows: 4, subDivisions: 4 },   // 4列×4行=16格 × 16小格 = 256子格
+  128: { level: 128, cols: 8, rows: 4, subDivisions: 4 }, // 8列×4行=32格 × 16小格 = 512子格
+};
+
+// 根据分辨率自动检测网格层级
+export function detectGridLevel(width: number): GridLevelConfig {
+  if (width <= 1280) {
+    return GRID_LEVELS[32];   // 低分辨率：32层级
+  } else if (width <= 1920) {
+    return GRID_LEVELS[64];   // 中等分辨率：64层级
+  } else {
+    return GRID_LEVELS[128];  // 高分辨率：128层级
+  }
 }
 
 // 默认网格配置
 export const DEFAULT_GRID_CONFIG: GridConfig = {
+  mainGridCols: 4,                // 4列
+  mainGridRows: 4,                // 4行（默认中分辨率）
   mainGridColor: '255,0,0',       // 红色
   mainGridLineWidth: 2,
   mainGridAlpha: 0.6,
 
-  subGridSize: 16,                // 每 16px 一个点
   subGridColor: '255,0,0',        // 红色
   subGridLineWidth: 1,
   subGridAlpha: 0.2,
-
   dashLength: 4,                  // 线段长度 4px
   gapLength: 4,                   // 间隙长度 4px
+  subDivisions: 4,                // 每大格细分4份（形成4x4小格）
 };
 
-// 在图像上叠加双层网格：九宫格 + 点线网格
+// 在图像上叠加双层网格：大格子实线 + 小格子虚线细分
 export function drawGrid(
   image: Jimp,
   config: Partial<GridConfig> = {}
@@ -109,21 +135,28 @@ export function drawGrid(
     return [parts[0], parts[1], parts[2], Math.round(alpha * 255)];
   };
 
-  // 绘制九宫格（3x3 粗实线）
-  const mainGridCount = 3;
-  const mainCellWidth = Math.floor(width / mainGridCount);
-  const mainCellHeight = Math.floor(height / mainGridCount);
+  const mainRgba = colorToRGBA(gridConfig.mainGridColor, gridConfig.mainGridAlpha);
+  const subRgba = colorToRGBA(gridConfig.subGridColor, gridConfig.subGridAlpha);
 
-  // 九宫格横线
-  for (let i = 0; i < mainGridCount + 1; i++) {
+  // 计算大格子尺寸
+  const mainCellWidth = Math.floor(width / gridConfig.mainGridCols);
+  const mainCellHeight = Math.floor(height / gridConfig.mainGridRows);
+  const subDivisions = gridConfig.subDivisions;
+  const dashLength = gridConfig.dashLength;
+  const gapLength = gridConfig.gapLength;
+
+  // ========== 绘制大格子边框（粗实线）==========
+
+  // 大格子横线
+  for (let i = 0; i <= gridConfig.mainGridRows; i++) {
     const y = i * mainCellHeight;
-    for (let dx = 0; dx < gridConfig.mainGridLineWidth!; dx++) {
-      const lineY = y + dx;
+    if (y >= height) continue;
+    for (let dy = 0; dy < gridConfig.mainGridLineWidth; dy++) {
+      const lineY = y + dy;
       if (lineY >= height) continue;
-      const rgba = colorToRGBA(gridConfig.mainGridColor, gridConfig.mainGridAlpha);
       for (let x = 0; x < width; x++) {
         image.setPixelColor(
-          Jimp.rgbaToInt(rgba[0], rgba[1], rgba[2], rgba[3]),
+          Jimp.rgbaToInt(mainRgba[0], mainRgba[1], mainRgba[2], mainRgba[3]),
           x,
           lineY
         );
@@ -131,16 +164,16 @@ export function drawGrid(
     }
   }
 
-  // 九宫格竖线
-  for (let i = 0; i < mainGridCount + 1; i++) {
+  // 大格子竖线
+  for (let i = 0; i <= gridConfig.mainGridCols; i++) {
     const x = i * mainCellWidth;
-    for (let dx = 0; dx < gridConfig.mainGridLineWidth!; dx++) {
+    if (x >= width) continue;
+    for (let dx = 0; dx < gridConfig.mainGridLineWidth; dx++) {
       const lineX = x + dx;
       if (lineX >= width) continue;
-      const rgba = colorToRGBA(gridConfig.mainGridColor, gridConfig.mainGridAlpha);
       for (let y = 0; y < height; y++) {
         image.setPixelColor(
-          Jimp.rgbaToInt(rgba[0], rgba[1], rgba[2], rgba[3]),
+          Jimp.rgbaToInt(mainRgba[0], mainRgba[1], mainRgba[2], mainRgba[3]),
           lineX,
           y
         );
@@ -148,41 +181,59 @@ export function drawGrid(
     }
   }
 
-  // 绘制点线网格
-  const dashLength = gridConfig.dashLength!;
-  const gapLength = gridConfig.gapLength!;
-  const subGridSize = gridConfig.subGridSize!;
-  const rgba = colorToRGBA(gridConfig.subGridColor, gridConfig.subGridAlpha!);
+  // ========== 绘制小格子虚线（每个大格子内细分）==========
 
-  // 点线横线
-  for (let y = 0; y < height; y += subGridSize) {
-    for (let dx = 0; dx < gridConfig.subGridLineWidth!; dx++) {
-      const lineY = y + dx;
-      if (lineY >= height) continue;
-      for (let x = 0; x < width; x += dashLength + gapLength) {
-        for (let dx2 = 0; dx2 < dashLength && (x + dx2) < width; dx2++) {
-          image.setPixelColor(
-            Jimp.rgbaToInt(rgba[0], rgba[1], rgba[2], rgba[3]),
-            x + dx2,
-            lineY
-          );
+  // 在每个大格子内绘制虚线（垂直和水平各 subDivisions-1 条）
+  for (let row = 0; row < gridConfig.mainGridRows; row++) {
+    for (let col = 0; col < gridConfig.mainGridCols; col++) {
+      const cellStartX = col * mainCellWidth;
+      const cellStartY = row * mainCellHeight;
+      const cellEndX = Math.min((col + 1) * mainCellWidth, width);
+      const cellEndY = Math.min((row + 1) * mainCellHeight, height);
+
+      // 小格子的步长
+      const subCellWidth = (cellEndX - cellStartX) / subDivisions;
+      const subCellHeight = (cellEndY - cellStartY) / subDivisions;
+
+      // 在大格子内绘制水平虚线（subDivisions-1 条）
+      for (let i = 1; i < subDivisions; i++) {
+        const y = Math.floor(cellStartY + i * subCellHeight);
+        if (y >= cellEndY) continue;
+        for (let dy = 0; dy < gridConfig.subGridLineWidth; dy++) {
+          const lineY = y + dy;
+          if (lineY >= height) continue;
+
+          // 绘制虚线段
+          for (let x = cellStartX; x < cellEndX; x += dashLength + gapLength) {
+            for (let dx = 0; dx < dashLength && (x + dx) < cellEndX; dx++) {
+              image.setPixelColor(
+                Jimp.rgbaToInt(subRgba[0], subRgba[1], subRgba[2], subRgba[3]),
+                x + dx,
+                lineY
+              );
+            }
+          }
         }
       }
-    }
-  }
 
-  // 点线竖线
-  for (let x = 0; x < width; x += subGridSize) {
-    for (let dx = 0; dx < gridConfig.subGridLineWidth!; dx++) {
-      const lineX = x + dx;
-      if (lineX >= width) continue;
-      for (let y = 0; y < height; y += dashLength + gapLength) {
-        for (let dx2 = 0; dx2 < dashLength && (y + dx2) < height; dx2++) {
-          image.setPixelColor(
-            Jimp.rgbaToInt(rgba[0], rgba[1], rgba[2], rgba[3]),
-            lineX,
-            y + dx2
-          );
+      // 在大格子内绘制垂直虚线（subDivisions-1 条）
+      for (let i = 1; i < subDivisions; i++) {
+        const x = Math.floor(cellStartX + i * subCellWidth);
+        if (x >= cellEndX) continue;
+        for (let dx = 0; dx < gridConfig.subGridLineWidth; dx++) {
+          const lineX = x + dx;
+          if (lineX >= width) continue;
+
+          // 绘制虚线段
+          for (let y = cellStartY; y < cellEndY; y += dashLength + gapLength) {
+            for (let dy = 0; dy < dashLength && (y + dy) < cellEndY; dy++) {
+              image.setPixelColor(
+                Jimp.rgbaToInt(subRgba[0], subRgba[1], subRgba[2], subRgba[3]),
+                lineX,
+                y + dy
+              );
+            }
+          }
         }
       }
     }
@@ -199,7 +250,8 @@ export async function captureFrameWithGrid(
   maxWidth = 1366,
   maxHeight = 768,
   showGrid = true,
-  gridConfigOverride?: Partial<GridConfig>
+  gridConfigOverride?: Partial<GridConfig>,
+  gridLevel?: 32 | 64 | 128
 ): Promise<FrameData> {
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
@@ -228,10 +280,33 @@ export async function captureFrameWithGrid(
   // 2. 用 Jimp 加载
   const image = await Jimp.read(losslessJpegBuffer);
 
-  // 3. 叠加网格
-  const imageWithGrid = drawGrid(image, gridConfigOverride);
+  // 3. 根据分辨率或指定层级确定网格配置
+  let finalGridConfig: Partial<GridConfig>;
+  
+  if (gridLevel && GRID_LEVELS[gridLevel]) {
+    // 使用指定的层级配置
+    const levelConfig = GRID_LEVELS[gridLevel];
+    finalGridConfig = {
+      mainGridCols: levelConfig.cols,
+      mainGridRows: levelConfig.rows,
+      subDivisions: levelConfig.subDivisions,
+      ...gridConfigOverride,
+    };
+  } else {
+    // 自动检测分辨率层级
+    const detectedLevel = detectGridLevel(size.width);
+    finalGridConfig = {
+      mainGridCols: detectedLevel.cols,
+      mainGridRows: detectedLevel.rows,
+      subDivisions: detectedLevel.subDivisions,
+      ...gridConfigOverride,
+    };
+  }
 
-  // 4. 压缩到指定质量
+  // 4. 叠加网格
+  const imageWithGrid = drawGrid(image, finalGridConfig);
+
+  // 5. 压缩到指定质量
   const compressedBuffer = await new Promise<Buffer>((resolve, reject) => {
     imageWithGrid.quality(quality).getBuffer('image/jpeg', (err, buffer) => {
       if (err) {

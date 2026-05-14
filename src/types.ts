@@ -156,10 +156,11 @@ export interface ScreenshotRequest {
   maxWidth?: number;
   maxHeight?: number;
   showGrid?: boolean;      // 是否叠加网格
-  gridSize?: number;       // 子网格间距（像素）
+  gridLevel?: 32 | 64 | 128;  // 网格层级（32/64/128），不指定则自动检测
   gridColor?: string;      // 网格颜色（RGB 格式）
   gridLineWidth?: number;  // 网格线宽
   gridAlpha?: number;      // 网格透明度（0-1）
+  subGridAlpha?: number;   // 小格虚线透明度（0-1）
 }
 
 export interface ScreenshotResponse {

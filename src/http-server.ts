@@ -1,7 +1,7 @@
 /** HTTP API Server — 提供截图、鼠标、键盘操作等 RESTful API */
 
 import express, { Request, Response, NextFunction } from 'express';
-import { captureFrame, captureFrameWithGrid, getScreenInfo, DEFAULT_GRID_CONFIG } from './screen';
+import { captureFrame, captureFrameWithGrid, getScreenInfo, detectGridLevel, GRID_LEVELS } from './screen';
 import { mouseMove, mouseLeftClick, mouseRightClick, mouseDoubleClick, mouseScroll, mouseDrag, mousePressLeft, mouseReleaseLeft, getMousePosition } from './mouse';
 import { keyboardType, keyboardPress, keyboardRelease } from './keyboard';
 import { getConfig } from './config';
@@ -47,7 +47,7 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
   // ===== 截图 API =====
 
   // GET /api/screenshot — 直接返回 JPEG 图片（适合 curl 保存）
-  // 支持查询参数：quality, maxWidth, maxHeight, showGrid, gridSize, gridColor
+  // 支持查询参数：quality, maxWidth, maxHeight, showGrid, gridLevel, gridColor, gridAlpha, subGridAlpha
   app.get('/api/screenshot', async (req: Request, res: Response) => {
     try {
       const quality = req.query.quality ? parseInt(req.query.quality as string) : 80;
@@ -55,16 +55,24 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
       const maxHeight = req.query.maxHeight ? parseInt(req.query.maxHeight as string) : undefined;
       const showGrid = req.query.showGrid === 'true';
 
+      // 网格层级参数
+      let gridLevel: 32 | 64 | 128 | undefined;
+      if (req.query.gridLevel) {
+        const level = parseInt(req.query.gridLevel as string);
+        if (level === 32 || level === 64 || level === 128) {
+          gridLevel = level;
+        }
+      }
+
       // 网格配置参数
       let gridConfigOverride;
       if (showGrid) {
-        const gridSize = req.query.gridSize ? parseInt(req.query.gridSize as string) : undefined;
         const gridColor = req.query.gridColor ? req.query.gridColor as string : undefined;
         const gridLineWidth = req.query.gridLineWidth ? parseInt(req.query.gridLineWidth as string) : undefined;
         const gridAlpha = req.query.gridAlpha ? parseFloat(req.query.gridAlpha as string) : undefined;
+        const subGridAlpha = req.query.subGridAlpha ? parseFloat(req.query.subGridAlpha as string) : undefined;
 
         gridConfigOverride = {};
-        if (gridSize !== undefined) gridConfigOverride.subGridSize = gridSize;
         if (gridColor !== undefined) {
           gridConfigOverride.mainGridColor = gridColor;
           gridConfigOverride.subGridColor = gridColor;
@@ -73,15 +81,13 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
           gridConfigOverride.mainGridLineWidth = gridLineWidth;
           gridConfigOverride.subGridLineWidth = gridLineWidth;
         }
-        if (gridAlpha !== undefined) {
-          gridConfigOverride.mainGridAlpha = gridAlpha;
-          gridConfigOverride.subGridAlpha = gridAlpha;
-        }
+        if (gridAlpha !== undefined) gridConfigOverride.mainGridAlpha = gridAlpha;
+        if (subGridAlpha !== undefined) gridConfigOverride.subGridAlpha = subGridAlpha;
       }
 
       let frame;
       if (showGrid) {
-        frame = await captureFrameWithGrid(quality, maxWidth, maxHeight, true, gridConfigOverride);
+        frame = await captureFrameWithGrid(quality, maxWidth, maxHeight, true, gridConfigOverride, gridLevel);
       } else {
         frame = await captureFrame(quality, maxWidth, maxHeight);
       }
@@ -97,14 +103,13 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
   });
 
   // POST /api/screenshot — 返回 base64 JSON（适合程序处理）
-  // 请求体支持：quality, maxWidth, maxHeight, showGrid, gridSize, gridColor, gridLineWidth, gridAlpha
+  // 请求体支持：quality, maxWidth, maxHeight, showGrid, gridLevel, gridColor, gridLineWidth, gridAlpha, subGridAlpha
   app.post('/api/screenshot', async (req: Request, res: Response) => {
     try {
-      const { quality = 80, maxWidth, maxHeight, showGrid = false, gridSize, gridColor, gridLineWidth, gridAlpha }: ScreenshotRequest = req.body || {};
+      const { quality = 80, maxWidth, maxHeight, showGrid = false, gridLevel, gridColor, gridLineWidth, gridAlpha, subGridAlpha }: ScreenshotRequest = req.body || {};
       let frame;
       if (showGrid) {
         const gridConfigOverride: any = {};
-        if (gridSize !== undefined) gridConfigOverride.subGridSize = gridSize;
         if (gridColor !== undefined) {
           gridConfigOverride.mainGridColor = gridColor;
           gridConfigOverride.subGridColor = gridColor;
@@ -113,8 +118,9 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
           gridConfigOverride.mainGridLineWidth = gridLineWidth;
           gridConfigOverride.subGridLineWidth = gridLineWidth;
         }
-        if (gridAlpha !== undefined) gridConfigOverride.mainGridAlpha = gridConfigOverride.subGridAlpha = gridAlpha;
-        frame = await captureFrameWithGrid(quality, maxWidth, maxHeight, true, gridConfigOverride);
+        if (gridAlpha !== undefined) gridConfigOverride.mainGridAlpha = gridAlpha;
+        if (subGridAlpha !== undefined) gridConfigOverride.subGridAlpha = subGridAlpha;
+        frame = await captureFrameWithGrid(quality, maxWidth, maxHeight, true, gridConfigOverride, gridLevel);
       } else {
         frame = await captureFrame(quality, maxWidth, maxHeight);
       }
@@ -317,12 +323,16 @@ export function startHTTPServer(): { app: express.Application; close: () => Prom
     console.log(`  GET  /api/accessibility?maxDepth=3`);
     console.log(`  GET  /api/accessibility/focused`);
     console.log(`\nAuth: Use Authorization: Bearer <password> header`);
-    console.log(`\nScreenshot grid options:`);
-    console.log(`  showGrid=true        - enable grid overlay`);
-    console.log(`  gridSize=16         - sub-grid spacing (pixels)`);
-    console.log(`  gridColor=255,0,0   - grid color (RGB)`);
-    console.log(`  gridAlpha=0.6       - grid opacity (0-1)`);
-    console.log(`  gridLineWidth=2     - grid line width (pixels)`);
+  console.log(`\nScreenshot grid options:`);
+  console.log(`  showGrid=true        - enable grid overlay`);
+  console.log(`  gridLevel=32|64|128  - grid level (auto-detected by resolution if not specified)`);
+  console.log(`    - 32:  4x2=8  main grids, 16 sub-grids each (128 total)`);
+  console.log(`    - 64:  4x4=16 main grids, 16 sub-grids each (256 total)`);
+  console.log(`    - 128: 8x4=32 main grids, 16 sub-grids each (512 total)`);
+  console.log(`  gridColor=255,0,0   - grid color (RGB)`);
+  console.log(`  gridAlpha=0.6       - main grid opacity (0-1)`);
+  console.log(`  subGridAlpha=0.2    - sub-grid dashed lines opacity (0-1)`);
+  console.log(`  gridLineWidth=2     - grid line width (pixels)`);
   });
 
   return {
